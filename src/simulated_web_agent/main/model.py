@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import openai
 from typing_extensions import override
 
-from ..agent import Agent, context
+from ..agent import Agent, context, gpt
 from ..executor.env import WebAgentEnv
 from .profiler import TokenProfiler
 
@@ -137,9 +137,15 @@ class AgentPolicy(BasePolicy):
         self.slow_loop_task = None
 
     async def slow_loop(self):
+        seen = -1
         while True:
+            # One reflect/wonder round per agent step (upstream loops as fast as the LLM answers and never stops).
+            while self.agent.memory.timestamp == seen:
+                await asyncio.sleep(1)
+            seen = self.agent.memory.timestamp
             await self.agent.reflect()
-            await self.agent.wonder()
+            if not (gpt.provider in gpt.cli_llm.PROVIDERS and gpt.cli_llm.LEAN):
+                await self.agent.wonder()
             await self.agent.memory.update()
 
     async def forward(self, playwright_env):

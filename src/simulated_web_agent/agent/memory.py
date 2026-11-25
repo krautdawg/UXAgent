@@ -74,7 +74,7 @@ class Memory:
                 memory_to_embed = self.memories[start_idx:]
                 if not memory_to_embed:
                     return np.array([]), 0
-                inputs = [m.content for m in memory_to_embed]
+                inputs = [m.content[:16000] for m in memory_to_embed]
                 embeds = await embed_text(inputs)
                 embeds = np.array(embeds)
                 for i, m in enumerate(memory_to_embed):
@@ -91,6 +91,39 @@ class Memory:
                 memory_to_update = self.memories[start_idx:]
                 if not memory_to_update:
                     return np.array([]), 0
+                if gpt.provider in gpt.cli_llm.PROVIDERS:
+                    scores = [{"reflection": 7, "thought": 6, "plan": 6}.get(m.kind, 5) for m in memory_to_update]
+                    if not gpt.cli_llm.LEAN:
+                        # One call per batch instead of one per memory: every CLI call costs subscription quota.
+                        resp = await async_chat(
+                            [
+                                {
+                                    "role": "system",
+                                    "content": MEMORY_IMPORTANCE_PROMPT
+                                    + "\n\nThis time you receive several memories in the list `memories`. "
+                                    'Score each one. Output only {"scores": [<one score per memory, in the same order>]}.',
+                                },
+                                {
+                                    "role": "user",
+                                    "content": json.dumps(
+                                        {
+                                            "persona": self.agent.persona,
+                                            "intent": self.agent.intent,
+                                            "plan": self.agent.current_plan.content if self.agent.current_plan else None,
+                                            "memories": [m.content for m in memory_to_update],
+                                        }
+                                    ),
+                                },
+                            ],
+                            json_mode=True,
+                            log=False,
+                        )
+                        got = json.loads(resp).get("scores", [])
+                        scores = got if len(got) == len(memory_to_update) else scores
+                    new_importance = np.array(scores, dtype=float) / 10
+                    for i, m in enumerate(memory_to_update):
+                        m.importance = new_importance[i]
+                    return new_importance, len(memory_to_update)
                 requests = [
                     [
                         {"role": "system", "content": MEMORY_IMPORTANCE_PROMPT},

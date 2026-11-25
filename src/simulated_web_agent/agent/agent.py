@@ -69,8 +69,9 @@ class Agent:
     async def perceive(self, environment):
         environment_full = json.dumps(environment)
 
-        for denied_word in self.deny_list:
-            environment_full = environment_full.replace(denied_word, "***")
+        # Upstream replaced the deny_list words ("security", "crime") with ***; real sites use them in labels, so the page stays as it is.
+        if len(environment_full) > 40000:  # a person skims a very long page; PERCEIVE would transcribe all of it
+            environment_full = environment_full[:40000] + " ...[this long page continues below]"
         # print(environment_full)
         logger.info("agent perceiving environment...")
         with LogApiCall():
@@ -81,9 +82,10 @@ class Agent:
             result = await async_chat(request, json_mode=True, max_tokens=64000)
             result = json.loads(result)
             print(result)
-            self.observation = result["observations"][0]
+            observation = (result.get("observations") or ["I see an empty page."])[0]
+            self.observation = observation
             await self.memory.add_memory_piece(
-                Observation(result["observations"][0], self.memory, environment)
+                Observation(observation, self.memory, environment)
             )
 
     @staticmethod
@@ -156,7 +158,7 @@ class Agent:
             ],
             log=False,
             json_mode=True,
-            model="large",
+            model="small",
         )
         reflections = json.loads(reflections)["insights"]
         logger.info("reflections: %s", reflections)
@@ -238,7 +240,7 @@ class Agent:
             ],
             log=False,
             json_mode=True,
-            model="large",
+            model="small",
         )
         resp = json.loads(resp)
         logger.info("wondering: %s", resp)

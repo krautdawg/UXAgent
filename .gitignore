@@ -142,3 +142,9 @@ old_data
 *.zip
 
 *.mp4
+
+# persona audits (uxaudit.py)
+runs/
+LIMIT
+CLAUDE_LIMIT
+browser_session/

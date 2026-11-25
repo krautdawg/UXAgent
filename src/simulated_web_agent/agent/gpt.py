@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, cast
@@ -20,9 +21,10 @@ from dotenv import load_dotenv
 # from litellm import drop_params, token_counter
 from litellm.router import Router
 
-from . import context
+from . import cli_llm, context
 
-provider = "openai"  # "openai" or "aws" or "anthropic"
+# "openai", "aws", "anthropic" (API keys, via litellm) or "codex", "claude", "auto" (headless CLI sessions, see cli_llm.py)
+provider = "openai"
 
 prompt_dir = Path(__file__).parent.absolute() / "shop_prompts"
 
@@ -47,7 +49,7 @@ chat_router = Router(
         {
             "model_name": "anthropic",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
             },
         },
         {
@@ -70,7 +72,7 @@ chat_router = Router(
         {
             "model_name": "anthropic_thinking",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
                 "thinking": {
                     "type": "enabled",
                     "budget_tokens": 32000,
@@ -84,7 +86,7 @@ slow_chat_router = Router(
     model_list=[
         {
             "model_name": "openai",
-            "litellm_params": {"model": "openai/gpt-5", "reasoning_effort": "minimal"},
+            "litellm_params": {"model": os.environ.get("UXAGENT_OPENAI_LARGE", "openai/gpt-5"), "reasoning_effort": "low"},
         },
         {
             "model_name": "aws",
@@ -98,7 +100,7 @@ slow_chat_router = Router(
         {
             "model_name": "anthropic",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
             },
         },
         {
@@ -118,7 +120,7 @@ slow_chat_router = Router(
         {
             "model_name": "anthropic_thinking",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
                 "thinking": {
                     "type": "enabled",
                     "budget_tokens": 32000,
@@ -147,7 +149,10 @@ embed_router = Router(
 
 
 load_dotenv()  # load anthropic api key from .env
-anthropic_client = anthropic.Anthropic()
+try:
+    anthropic_client = anthropic.Anthropic()
+except Exception:  # no key: only the computer-use path needs this client
+    anthropic_client = None
 anthropic_model = "claude-sonnet-4-20250514"
 
 
@@ -212,6 +217,35 @@ def _extract_json_string(text: str) -> str:
         raise Exception("No JSON object found in the response")
 
 
+async def _router_chat(messages, model, json_mode, max_tokens, enable_thinking, **kwargs):
+    router = chat_router if model == "small" else slow_chat_router
+    call_kwargs: Dict[str, Any] = dict(**kwargs)
+    if enable_thinking:
+        router_model = provider + "_thinking"
+    else:
+        router_model = provider
+    if json_mode and provider == "openai":
+        call_kwargs["response_format"] = {"type": "json_object"}
+    response = await router.acompletion(
+        model=router_model,
+        messages=messages,
+        max_tokens=max_tokens,
+        drop_params=True,  # do not forward unused params, such as thinking for openai
+        **call_kwargs,
+        tools=None,
+    )
+    content = response.choices[0].message.get("content", "")
+    u = response.usage
+    cli_llm._ledger(response.model, u.prompt_tokens, None, u.completion_tokens, (response._hidden_params or {}).get("response_cost"))
+
+    finish_reason = response.choices[0].finish_reason
+    if finish_reason != "stop":
+        print("finish_reason:", finish_reason)
+        print("content:", content)
+        print("response:", response)
+    return content
+
+
 @async_retry()
 async def async_chat(
     messages,
@@ -244,29 +278,10 @@ async def async_chat(
     if context.api_call_manager.get() and log:
         context.api_call_manager.get().request.append(messages)
 
-    router = chat_router if model == "small" else slow_chat_router
-    call_kwargs: Dict[str, Any] = dict(**kwargs)
-    if enable_thinking:
-        router_model = provider + "_thinking"
+    if provider in cli_llm.PROVIDERS:
+        content = await cli_llm.chat(provider, messages, model, json_mode)
     else:
-        router_model = provider
-    if json_mode and provider == "openai":
-        call_kwargs["response_format"] = {"type": "json_object"}
-    response = await router.acompletion(
-        model=router_model,
-        messages=messages,
-        max_tokens=max_tokens,
-        drop_params=True,  # do not forward unused params, such as thinking for openai
-        **call_kwargs,
-        tools=None,
-    )
-    content = response.choices[0].message.get("content", "")
-
-    finish_reason = response.choices[0].finish_reason
-    if finish_reason != "stop":
-        print("finish_reason:", finish_reason)
-        print("content:", content)
-        print("response:", response)
+        content = await _router_chat(messages, model, json_mode, max_tokens, enable_thinking, **kwargs)
     # tokens_used = token_counter(model="openai/gpt-5-mini", text=content)
     # print("Output tokens:", tokens_used)
 
@@ -275,6 +290,19 @@ async def async_chat(
 
     if json_mode:
         # Extract JSON substring from the content
+        try:
+            json.loads(content)
+            return content
+        except Exception:
+            pass
+        try:  # models copy unescaped quotes from the page into JSON strings: repair before giving up
+            from json_repair import repair_json
+
+            fixed = repair_json(content)
+            if isinstance(json.loads(fixed), dict):
+                return fixed
+        except Exception:
+            pass
         try:
             json_str = _extract_json_string(content)
             _ = json.loads(json_str)
@@ -336,6 +364,8 @@ async def embed_text(texts: list[str]) -> list[list[float]]:
     Returns:
         List of list[float] representing each of the embedded texts
     """
+    if provider in cli_llm.PROVIDERS:
+        return cli_llm.embed(texts)
     try:
         response = await embed_router.aembedding(model=provider, input=texts)
         return [e["embedding"] for e in response.data]

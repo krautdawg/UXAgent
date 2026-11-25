@@ -1,0 +1,91 @@
+# One audit = one project folder with this file in it. Run:  uv run python uxaudit.py <command> <project>/audit.yaml
+# Everything the run writes (personas.json, plan.json, runs/, results.json) lands next to this file.
+
+provider: auto          # auto = headless Codex until its usage window is spent, then headless Claude. Also: codex, claude, openai, aws, anthropic
+total_personas: 20
+concurrency: 8          # browsers at once
+chunk: 8                # sessions between two looks at the usage windows and the cost cap
+
+limits:
+  codex_weekly_stop: 90   # percent of the weekly Codex window at which the run leaves Codex for good
+  codex_window_pause: 80  # percent of the 5-hour Codex window at which chunks go to Claude until it resets
+  cost_cap_usd: 80        # ledger cost (API cost, or the API-equivalent `claude -p` reports) at which the run stops
+
+# Who the simulated users are. Every persona gets one choice per entry, drawn by weight.
+demographics:
+  - name: "Role"
+    choices:
+      - { name: "owner of a small shop", weight: 3 }
+      - { name: "employee who was sent the link by a colleague", weight: 2 }
+  - name: "Tech comfort"
+    choices:
+      - { name: "low: uses a phone for messaging and little else, gives up quickly when a screen is unclear", weight: 3 }
+      - { name: "medium: comfortable with video calls and online banking", weight: 5 }
+      - { name: "high: early adopter, reads settings and privacy pages", weight: 2 }
+  - name: "Age"
+    choices:
+      - { name: "25-34", weight: 2 }
+      - { name: "35-49", weight: 4 }
+      - { name: "50-70", weight: 3 }
+
+example_persona: |
+  Background:
+  She is 47 and runs the office of a 20-person cleaning company. She prepares the paperwork for a few tenders a year.
+  Technology Habits:
+  Medium tech comfort. If a screen is unclear she reads it twice, then asks someone or gives up.
+  Attitude:
+  Careful and sceptical of marketing claims. She wants to see the price before she gives her email address.
+
+# The device mix, as [device, count]: Playwright device names ("iPhone 15", "Pixel 7 landscape", "iPad Mini") or "WIDTHxHEIGHT".
+# Without this list a demographic named "Device" is used, if there is one.
+devices:
+  - ["iPhone 15", 5]
+  - ["iPhone SE", 2]
+  - ["Pixel 7", 3]
+  - ["Galaxy S24 landscape", 1]
+  - ["iPad Mini", 2]
+  - ["1366x768", 4]
+  - ["1920x1080", 3]
+
+# The flows. `plan` gives every persona every flow. Write a scenario, not instructions: say what the person
+# wants and knows, never which button to press. {attempt} is replaced by the number of earlier tries of that session.
+# For flows that need seeded state (accounts, test data, signed-in sessions) write plan.json with your own script:
+# a list of entries = a persona plus run_id, flow, intent, start_url, max_steps, and optionally
+# context_options (e.g. a Playwright storage_state), upload_file and upload_label.
+flows:
+  - name: first-visit
+    start_url: https://example.com/
+    max_steps: 15
+    intent: >-
+      A colleague mentioned this site. Find out what it does and what it costs, and decide whether it is for you.
+      When you are finished, or at the point where you would give up or leave in real life,
+      the next step of your plan must be the single word: terminate.
+
+questionnaire:
+  questionnaire_id: example_v1
+  title: Post-session questions
+  questions:
+    - { id: done, type: multiple_choice, options: ["yes, fully", "partly", "no"], prompt: "Did I achieve what I set out to do in this session?" }
+    # sus1..sus10 are scored as the System Usability Scale by `report`
+    - { id: sus1, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I think that I would like to use this system frequently. (1 = Strongly disagree, 5 = Strongly agree)" }
+    - { id: sus2, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I found the system unnecessarily complex. (1-5)" }
+    - { id: sus3, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I thought the system was easy to use. (1-5)" }
+    - { id: sus4, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I think that I would need the support of a technical person to be able to use this system. (1-5)" }
+    - { id: sus5, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I found the various functions in this system were well integrated. (1-5)" }
+    - { id: sus6, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I thought there was too much inconsistency in this system. (1-5)" }
+    - { id: sus7, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I would imagine that most people would learn to use this system very quickly. (1-5)" }
+    - { id: sus8, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I found the system very cumbersome to use. (1-5)" }
+    - { id: sus9, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I felt very confident using the system. (1-5)" }
+    - { id: sus10, type: multiple_choice, options: ["1", "2", "3", "4", "5"], prompt: "I needed to learn a lot of things before I could get going with this system. (1-5)" }
+    - { id: stuck, type: short_text, prompt: "Where exactly did I hesitate or get stuck? Name the screen and the control or wording." }
+    - { id: confusing, type: short_text, prompt: "Which word, label or sentence on screen confused me most? Quote it and say what I thought it meant." }
+    - { id: expected, type: short_text, prompt: "What did I expect to happen that did not happen, or what was missing?" }
+
+# For `report`: which screens a session reached. A milestone is a regex over a step's simplified HTML (lower-cased);
+# a page is matched by a part of the URL instead (server pages tend to quote UI strings).
+milestones:
+  landing: "<h1"
+  signup-form: ">create account</h1>"
+pages:
+  pricing: "/pricing"
+  privacy: "/privacy"

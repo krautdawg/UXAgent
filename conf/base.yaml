@@ -28,6 +28,7 @@ environment:
     # Launch options
     launch_options:
       headless: ${oc.decode:${oc.env:HEADLESS,true}}  # default = true
+      channel: "chrome"                # the installed Google Chrome
       args:                           # Performance optimization args
         - "--disable-autofill-keyboard-accessory-view"
         - "--disable-autofill-profile-update"
@@ -57,20 +58,20 @@ environment:
       bypass_csp: true
 
     # Browser cache and data directories
-    cache_dir: "./browser_cache"       # Persistent network cache directory
+    cache_dir: null                    # no shared network cache: parallel sessions must not see each other's responses
     user_data_dir: "./browser_session" # User data directory (cookies, session data)
 
     # Timeout configurations (in milliseconds)
     timeouts:
-      default: 10000        # Timeout for locator actions (click, type, etc.)
+      default: 5000         # Timeout for locator actions (click, type, etc.)
       page_load_domcontent: 10000 # Timeout for DOM content loaded
-      page_load_networkidle: 3000 # Timeout for network idle (longer for full page loads)
+      page_load_networkidle: 2000 # Timeout for network idle (longer for full page loads)
       element_wait: 2000          # Timeout for waiting for specific elements
-      custom_network_idle: 3000    # Time to wait for no network activity before considering idle
+      custom_network_idle: 700     # Time to wait for no network activity before considering idle
       container_health_check: 3000 # Timeout for container health checks (in milliseconds)
 
     # Sleep configuration (in seconds)
-    sleep_after_action: 2      # Sleep time after each action (helps with page stability)
+    sleep_after_action: 1      # Sleep time after each action (helps with page stability)
 
   # Browser tracing for debugging and analysis
   tracing:
@@ -92,7 +93,7 @@ survey:
 # LLM CONFIGURATION
 # ============================================================================
 # Large Language Model provider settings
-llm_provider: "aws"     # Provider: "openai" or "aws" or "anthropic"
+llm_provider: ${oc.env:UXAGENT_PROVIDER,openai}   # API keys: "openai", "aws", "anthropic". Subscriptions via headless CLI: "codex", "claude", "auto"
 
 # ============================================================================
 # GENERAL SETTINGS

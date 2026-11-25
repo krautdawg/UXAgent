@@ -18,6 +18,19 @@ Yuxuan Lu, Bingsheng Yao, Hansu Gu, Jing Huang, Jessie Wang, Laurence Li, Haiyan
 </p>
 
 
+## This fork
+
+This fork adds what it took to audit real products with UXAgent. Upstream's entry points still work.
+
+- **Persona audits with one driver.** `uxaudit.py` takes a project folder with an `audit.yaml` and runs personas, plan, sessions, survey and report. Runs are resumable and stay in the project folder. See `examples/audit.example.yaml`.
+- **No API key needed.** `llm_provider` (env `UXAGENT_PROVIDER`) also takes `codex`, `claude` and `auto`: every call is a headless `codex exec` or `claude -p` on a subscription. `auto` uses Codex until its usage window is spent, then Claude.
+- **A device per persona.** Any Playwright device name or `WIDTHxHEIGHT`, per plan entry, plus a signed-in `storage_state` where a flow needs one.
+- **Project hooks.** A `hooks.py` next to the audit holds what one site needs: Chrome flags, sign-in, route stand-ins, where a session must stop. See `examples/hooks.example.py`.
+- **More than the transcript.** Each session also writes an event log (console errors, failed requests, new tabs, file pickers), a layout probe per step (small targets, overflow, clipped and truncated controls) and a usage ledger.
+- **Parser and harness fixes.** Modal dialogs, `display: contents`, text order, self-closing tabs, pages read mid-navigation, a reflect loop that never stopped, crashes that went unrecorded.
+
+`CLAUDE.md` has the commands, the file map and the pitfalls.
+
 ## Overview
 **UXAgent** is a framework that uses Large Language Models (LLMs) as agents to conduct usability testing in web environments. These agents simulate human-like behaviors, allowing UX researchers to:
 - Perform early usability evaluations.

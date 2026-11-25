@@ -977,6 +977,12 @@ class WebAgentEnv:
             await env.back()
         """
         async with ElementHighlight(sleep=0.5):
+            # "back" in a tab that a link opened closes that tab, as on a phone
+            if len(self.context.pages) > 1 and await self.page.evaluate("history.length") <= 1:
+                await self.page.close()
+                self.page = self.context.pages[-1]
+                await self.page.bring_to_front()
+                return
             await self.page.go_back(wait_until="domcontentloaded")
             self.logger.info("Navigated back")
 
@@ -1137,6 +1143,8 @@ class WebAgentEnv:
         """Get parsed page content using the parser script"""
         parser_script_path = Path(self.config.parser_script_path)
         content = {}
+        if self.page.is_closed() and self.context.pages:  # a tab that closed itself (mailto:, tel:) is not the page any more
+            self.page = self.context.pages[-1]
 
         # Wait for page to be fully loaded and stable
         try:
@@ -1184,8 +1192,12 @@ class WebAgentEnv:
                 content = await self.page.evaluate(parser_code)
             except Exception as e:
                 self.logger.error(f"Parser script failed: {e}")
-                # Fallback to basic HTML content
-                content = {"html": await self.page.content()}
+                # Usually a navigation in flight: look again once, and keep the keys the agent reads
+                await asyncio.sleep(1.5)
+                try:
+                    content = await self.page.evaluate(parser_code)
+                except Exception:
+                    content = {"html": await self.page.content(), "clickable_elements": []}
         else:
             self.logger.warning(f"Parser script not found: {parser_script_path}")
             content = {"html": await self.page.content()}

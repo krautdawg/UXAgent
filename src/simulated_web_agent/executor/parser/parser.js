@@ -63,14 +63,19 @@ const parse = () => {
     return true;
   };
 
+  // While a modal dialog is open only the dialog is perceivable (the page behind it is inert).
+  const MODAL = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+    .filter((d) => d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden').pop() || null;
+
   const isVisible = (el) => {
+    if (MODAL && !MODAL.contains(el) && !el.contains(MODAL)) return false;
     const style = window.getComputedStyle(el);
     const hidden =
       style.display === 'none' ||
       style.visibility === 'hidden' ||
       parseFloat(style.opacity) === 0;
 
-    const zeroSize = el.offsetWidth === 0 && el.offsetHeight === 0;
+    const zeroSize = style.display !== 'contents' && el.offsetWidth === 0 && el.offsetHeight === 0;  // display:contents has no box of its own but its children show
 
     const rect = el.getBoundingClientRect();
     const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
@@ -243,20 +248,20 @@ const parse = () => {
       }
     }
 
-    for (const child of original.children) {
-      const cleaned = automaticStripElement(
-        child,
-        thisName || parentName,
-        parentIsClickable || isClickable
-      );
-      if (cleaned && (!isEmpty(cleaned))) {
-        clone.appendChild(cleaned);
-      }
-    }
-
+    // Keep text and elements in document order (upstream appended all text after all elements,
+    // which turned "Ihr Assistent. Ihre <em>Ausschreibung.</em>" into "Ausschreibung.Ihr Assistent.Ihre").
     for (const n of original.childNodes) {
       if (n.nodeType === 3 && n.textContent.trim()) {
-        clone.appendChild(document.createTextNode(n.textContent.trim()));
+        clone.appendChild(document.createTextNode(n.textContent.replace(/\s+/g, " ")));
+      } else if (n.nodeType === 1) {
+        const cleaned = automaticStripElement(
+          n,
+          thisName || parentName,
+          parentIsClickable || isClickable
+        );
+        if (cleaned && (!isEmpty(cleaned))) {
+          clone.appendChild(cleaned);
+        }
       }
     }
 
